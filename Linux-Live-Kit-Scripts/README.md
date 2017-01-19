@@ -27,3 +27,5 @@ distribution into a Live Kit (formely known as Live CD).
 
 
 Author: Tomas M. <http://www.linux-live.org>
+LFS-LiveCD-Creator: Rizwan Hasan
+Website: http://lfs-livecd.sourceforge.io
