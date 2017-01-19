@@ -1,0 +1,77 @@
+#!/bin/bash
+# Linux Live Kit version 7
+
+export PATH=.:./tools:../tools:/usr/sbin:/usr/bin:/sbin:/bin:/
+
+CHANGEDIR=$(dirname $(readlink -f $0))
+echo "Changing current directory to $CHANGEDIR"
+CWD="$(pwd)"
+cd $CHANGEDIR
+
+. ./.config || exit 1
+. ./livekitlib || exit 1
+
+# only root can continue, because only root can read all files from your system
+allow_only_root
+
+# check for mksquashfs with xz compression
+if [ "$(mksquashfs 2>&1 | grep "Xdict-size")" = "" ]; then
+   echo "mksquashfs not found or doesn't support -comp xz, aborting, no changes made"
+   exit 1
+fi
+
+# build initramfs image
+echo "Building intramfs image..."
+cd initramfs
+INITRAMFS=$(./initramfs_create "$LIVEKITNAME")
+cd ..
+
+# create live kit filesystem (cpio archive)
+rm -Rf "$LIVEKITDATA"
+BOOT="$LIVEKITDATA"/"$LIVEKITNAME"/boot
+mkdir -p "$BOOT"
+mkdir -p "$BOOT"/../changes
+mkdir -p "$BOOT"/../modules
+mv "$INITRAMFS" $BOOT/initrfs.img
+cp bootfiles/* $BOOT
+cat bootfiles/syslinux.cfg | sed -r "s:/boot/:/$LIVEKITNAME/boot/:" > $BOOT/syslinux.cfg
+cat bootfiles/bootinst.bat | sed -r "s:/boot/:/$LIVEKITNAME/boot/:" | sed -r "s:\\\\boot\\\\:\\\\$LIVEKITNAME\\\\boot\\\\:" > $BOOT/bootinst.bat
+cp $VMLINUZ $BOOT/
+
+if [ -d sb ]; then
+   cp sb/* $LIVEKITDATA/$LIVEKITNAME/
+else
+   # create compressed bundles
+   for i in $MKMOD; do
+      mksquashfs /$i $LIVEKITDATA/$LIVEKITNAME/$i.$BEXT -comp xz -b 512k -keep-as-directory
+   done
+fi
+
+# copy rootcopy folder
+if [ -d rootcopy ]; then
+   cp -a rootcopy $LIVEKITDATA/$LIVEKITNAME/
+fi
+
+# create ISO for CD image
+echo "Creating ISO file for CD boot..."
+cd "$LIVEKITDATA"
+TARGET=/mnt/z
+if [ ! -d $TARGET ]; then
+   TARGET=/tmp
+fi
+
+ARCH=$(uname -m)
+
+mkisofs -o "$TARGET/$LIVEKITNAME-$ARCH.iso" -v -J -R -D -A "$LIVEKITNAME" -V "$LIVEKITNAME" \
+-no-emul-boot -boot-info-table -boot-load-size 4 \
+-b "$LIVEKITNAME"/boot/isolinux.bin -c "$LIVEKITNAME"/boot/isolinux.boot . \
+>/dev/null 2>/dev/null
+
+cat "$CWD/bootinfo.txt" | fgrep -v "#" | sed -r "s/mylinux/$LIVEKITNAME/" | sed -r "s/\$//" > readme.txt
+echo "Creating ZIP for USB boot..."
+rm -f "$TARGET/$LIVEKITNAME-$ARCH.zip"
+zip -0 -r "$TARGET/$LIVEKITNAME-$ARCH.zip" *
+
+cd ..
+rm -Rf "$LIVEKITDATA"
+echo "finished. Find your result in $TARGET"
